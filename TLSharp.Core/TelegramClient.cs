@@ -22,7 +22,6 @@ namespace TLSharp.Core
     public class TelegramClient : IDisposable
     {
         private MtProtoSender _sender;
-        private AuthKey _key;
         private TcpTransport _transport;
         private string _apiHash = "";
         private int _apiId = 0;
@@ -46,7 +45,7 @@ namespace TLSharp.Core
             _handler = handler;
 
             _session = Session.TryLoadOrCreateNew(store, sessionUserId);
-            _transport = new TcpTransport(_session.ServerAddress, _session.Port, _handler);
+            _transport = new TcpTransport(_session.DataCenter.Address, _session.DataCenter.Port, _handler);
         }
 
         public async Task ConnectAsync(bool reconnect = false)
@@ -91,10 +90,10 @@ namespace TLSharp.Core
             }
 
             var dc = dcOptions.First(d => d.Id == dcId);
+            var dataCenter = new DataCenter (dcId, dc.IpAddress, dc.Port);
 
             _transport = new TcpTransport(dc.IpAddress, dc.Port, _handler);
-            _session.ServerAddress = dc.IpAddress;
-            _session.Port = dc.Port;
+            _session.DataCenter = dataCenter;
 
             await ConnectAsync(true);
 
@@ -122,6 +121,12 @@ namespace TLSharp.Core
                 }
                 catch(DataCenterMigrationException e)
                 {
+                    if (_session.DataCenter.DataCenterId.HasValue &&
+                        _session.DataCenter.DataCenterId.Value == e.DC)
+                    {
+                        throw new Exception($"Telegram server replied requesting a migration to DataCenter {e.DC} when this connection was already using this DataCenter", e);
+                    }
+
                     await ReconnectToDcAsync(e.DC);
                     // prepare the request for another try
                     request.ConfirmReceived = false;
@@ -258,11 +263,22 @@ namespace TLSharp.Core
             return await SendRequestAsync<Boolean>(req);
         }
 
-        public async Task<TLAbsDialogs> GetUserDialogsAsync()
+        public async Task<TLAbsDialogs> GetUserDialogsAsync(int offsetDate = 0, int offsetId = 0, TLAbsInputPeer offsetPeer = null, int limit = 100)
         {
-            var peer = new TLInputPeerSelf();
-            return await SendRequestAsync<TLAbsDialogs>(
-                new TLRequestGetDialogs() { OffsetDate = 0, OffsetPeer = peer, Limit = 100 });
+            if (!IsUserAuthorized())
+                throw new InvalidOperationException("Authorize user first!");
+
+            if (offsetPeer == null)
+                offsetPeer = new TLInputPeerSelf();
+
+            var req = new TLRequestGetDialogs()
+            { 
+                OffsetDate = offsetDate, 
+                OffsetId = offsetId, 
+                OffsetPeer = offsetPeer, 
+                Limit = limit
+            };
+            return await SendRequestAsync<TLAbsDialogs>(req);
         }
 
         public async Task<TLAbsUpdates> SendUploadedPhoto(TLAbsInputPeer peer, TLAbsInputFile file, string caption)
@@ -313,7 +329,7 @@ namespace TLSharp.Core
             await _sender.SendPingAsync();
         }
 
-        public async Task<TLAbsMessages> GetHistoryAsync(TLAbsInputPeer peer, int offset, int max_id, int limit)
+        public async Task<TLAbsMessages> GetHistoryAsync(TLAbsInputPeer peer, int offsetId = 0, int offsetDate = 0, int addOffset = 0, int limit = 100, int maxId = 0, int minId = 0)
         {
             if (!IsUserAuthorized())
                 throw new InvalidOperationException("Authorize user first!");
@@ -321,9 +337,12 @@ namespace TLSharp.Core
             var req = new TLRequestGetHistory()
             {
                 Peer = peer,
-                AddOffset = offset,
-                MaxId = max_id,
-                Limit = limit
+                OffsetId = offsetId,
+                OffsetDate = offsetDate,
+                AddOffset = addOffset,
+                Limit = limit,
+                MaxId = maxId,
+                MinId = minId
             };
             return await SendRequestAsync<TLAbsMessages>(req);
         }
