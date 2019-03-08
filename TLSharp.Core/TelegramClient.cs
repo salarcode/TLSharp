@@ -28,9 +28,10 @@ namespace TLSharp.Core
         private Session _session;
         private List<TLDcOption> dcOptions;
         private TcpClientConnectionHandler _handler;
+	    private bool _keepAlive;
 
-        public TelegramClient(int apiId, string apiHash,
-            ISessionStore store = null, string sessionUserId = "session", TcpClientConnectionHandler handler = null)
+		public TelegramClient(int apiId, string apiHash,
+            ISessionStore store = null, string sessionUserId = "session", bool keepAlive = false, TcpClientConnectionHandler handler = null)
         {
             if (apiId == default(int))
                 throw new MissingApiConfigurationException("API_ID");
@@ -43,9 +44,10 @@ namespace TLSharp.Core
             _apiHash = apiHash;
             _apiId = apiId;
             _handler = handler;
+	        _keepAlive = keepAlive;
 
-            _session = Session.TryLoadOrCreateNew(store, sessionUserId);
-            _transport = new TcpTransport(_session.DataCenter.Address, _session.DataCenter.Port, _handler);
+			_session = Session.TryLoadOrCreateNew(store, sessionUserId);
+            _transport = new TcpTransport(_session.DataCenter.Address, _session.DataCenter.Port, _keepAlive, _handler);
         }
 
         public async Task ConnectAsync(bool reconnect = false)
@@ -92,7 +94,7 @@ namespace TLSharp.Core
             var dc = dcOptions.First(d => d.Id == dcId);
             var dataCenter = new DataCenter (dcId, dc.IpAddress, dc.Port);
 
-            _transport = new TcpTransport(dc.IpAddress, dc.Port, _handler);
+            _transport = new TcpTransport(dc.IpAddress, dc.Port, _keepAlive, _handler);
             _session.DataCenter = dataCenter;
 
             await ConnectAsync(true);
